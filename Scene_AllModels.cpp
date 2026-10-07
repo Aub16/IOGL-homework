@@ -99,6 +99,14 @@ std::string gDemoPath = "video/camera_path.txt";
 std::string gRecordFile;
 const double RECORD_FPS = 60.0;
 std::vector<DemoKey> gDemoKeys;
+std::vector<glm::vec3> gDemoDir;	// gaze of each key as (yaw, pitch, 0) in radians: interpolated instead of the target point, so the turning speed does not depend on how close the target is
+
+// Scripted "normal use" segments: between t0 and t1 the camera is driven by simulated key
+// presses (same movement code as update()), instead of the spline
+struct DemoFree { float t0, t1; };
+struct DemoInput { std::string key; float t0, t1, yawRate, pitchRate; };	// key: W A S D UP DOWN SHIFT, or LOOK (degrees/s)
+std::vector<DemoFree> gDemoFree;
+std::vector<DemoInput> gDemoInputs;
 
 bool loadDemoPath(const std::string& path)
 {
@@ -109,22 +117,57 @@ bool loadDemoPath(const std::string& path)
 	{
 		if (line.empty() || line[0] == '#') continue;
 		std::istringstream ls(line);
+		std::string first;
+		ls >> first;
+		if (first == "free") { DemoFree f; if (ls >> f.t0 >> f.t1) gDemoFree.push_back(f); continue; }
+		if (first == "key") { DemoInput k; k.yawRate = k.pitchRate = 0.0f; if (ls >> k.key >> k.t0 >> k.t1) gDemoInputs.push_back(k); continue; }
+		if (first == "look") { DemoInput k; k.key = "LOOK"; if (ls >> k.yawRate >> k.pitchRate >> k.t0 >> k.t1) gDemoInputs.push_back(k); continue; }
+		if (first == "zoom") { DemoInput k; k.key = "ZOOM"; if (ls >> k.yawRate >> k.pitchRate >> k.t0 >> k.t1) gDemoInputs.push_back(k); continue; }	// FOV from yawRate to pitchRate (mouse wheel)
+		if (first == "flashkey") { DemoInput k; k.key = "FLASH"; k.yawRate = k.pitchRate = 0.0f; if (ls >> k.t0 >> k.t1) gDemoInputs.push_back(k); continue; }	// F key: flashlight on
 		DemoKey k;
-		if (ls >> k.t >> k.pos.x >> k.pos.y >> k.pos.z >> k.target.x >> k.target.y >> k.target.z >> k.fov >> k.flash >> k.wire)
+		k.t = (float)std::atof(first.c_str());
+		if (ls >> k.pos.x >> k.pos.y >> k.pos.z >> k.target.x >> k.target.y >> k.target.z >> k.fov >> k.flash >> k.wire)
 			gDemoKeys.push_back(k);
 	}
 	return !gDemoKeys.empty();
 }
 
-// Catmull-Rom spline through p1..p2 (p0 and p3 are the neighbours): the camera
-// glides through the keyframes without stopping at each one
-glm::vec3 catmullRom(const glm::vec3& p0, const glm::vec3& p1, const glm::vec3& p2, const glm::vec3& p3, float u)
+// Cubic Hermite interpolation between two keys. Unlike a plain Catmull-Rom spline, the tangents
+// take the real time between keys into account (velocity = slope between the neighbours), so
+// the camera glides at a steady pace even when the keys are unevenly spaced in time.
+glm::vec3 hermite(const glm::vec3& pa, const glm::vec3& pb, const glm::vec3& ma, const glm::vec3& mb, float dt, float u)
 {
-	return 0.5f * ((2.0f * p1) + (-p0 + p2) * u + (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * u * u + (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * u * u * u);
+	float u2 = u * u, u3 = u2 * u;
+	return (2.0f * u3 - 3.0f * u2 + 1.0f) * pa + (u3 - 2.0f * u2 + u) * dt * ma + (-2.0f * u3 + 3.0f * u2) * pb + (u3 - u2) * dt * mb;
+}
+
+// Velocity (per second) of a key's position (which = 0) or gaze direction (which = 1). Per component, the
+// harmonic mean of the two neighbouring slopes (monotone interpolation): the camera never
+// overshoots between two keys, and a pause (equal values) is a real stop with ease in / ease out.
+glm::vec3 keyTangent(int i, int which)
+{
+	int n = (int)gDemoKeys.size();
+	int im = std::max(i - 1, 0), ip = std::min(i + 1, n - 1);
+	if (gDemoKeys[i].t - gDemoKeys[im].t < 0.01f) im = i;	// hard cut: do not blend across it
+	if (gDemoKeys[ip].t - gDemoKeys[i].t < 0.01f) ip = i;
+	if (ip == im) return glm::vec3(0.0f);
+	const glm::vec3& a = which ? gDemoDir[im] : gDemoKeys[im].pos;
+	const glm::vec3& c = which ? gDemoDir[i] : gDemoKeys[i].pos;
+	const glm::vec3& b = which ? gDemoDir[ip] : gDemoKeys[ip].pos;
+	glm::vec3 m(0.0f);
+	for (int k = 0; k < 3; k++)
+	{
+		float s0 = (im == i) ? 0.0f : (c[k] - a[k]) / (gDemoKeys[i].t - gDemoKeys[im].t);
+		float s1 = (ip == i) ? 0.0f : (b[k] - c[k]) / (gDemoKeys[ip].t - gDemoKeys[i].t);
+		if (im == i) m[k] = s1;
+		else if (ip == i) m[k] = s0;
+		else if (s0 * s1 > 0.0f) m[k] = 2.0f * s0 * s1 / (s0 + s1);
+	}
+	return m;
 }
 
 // Smooth 1D value noise in [-1, 1]: a deterministic function of time, so every
-// render of the demo has exactly the same "hand shake"
+// render of the demo has exactly the same slow camera drift
 float shakeNoise(float x, float seed)
 {
 	auto h = [&](float i) { float v = std::sin(i * 127.1f + seed * 311.7f) * 43758.5453f; return (v - std::floor(v)) * 2.0f - 1.0f; };
@@ -133,26 +176,38 @@ float shakeNoise(float x, float seed)
 	return glm::mix(h(i), h(i + 1.0f), f);
 }
 
-// Camera position / target on the spline at time t (no shake)
+// Camera position / target on the path at time t (no shake)
 void sampleDemoPath(double t, glm::vec3& pos, glm::vec3& target, float& fov, int& flash, int& wire)
 {
 	int n = (int)gDemoKeys.size();
+	if ((int)gDemoDir.size() != n)
+	{
+		gDemoDir.clear();
+		for (const DemoKey& k : gDemoKeys)
+		{
+			glm::vec3 d = glm::normalize(k.target - k.pos);
+			float yaw = std::atan2(d.x, d.z);
+			if (!gDemoDir.empty())	// unwrap: always turn the short way
+			{
+				float prev = gDemoDir.back().x;
+				while (yaw - prev > glm::pi<float>()) yaw -= glm::two_pi<float>();
+				while (yaw - prev < -glm::pi<float>()) yaw += glm::two_pi<float>();
+			}
+			gDemoDir.push_back(glm::vec3(yaw, std::asin(glm::clamp(d.y, -1.0f, 1.0f)), 0.0f));
+		}
+	}
 	t = std::min(t, (double)gDemoKeys[n - 1].t - 1e-4);
 	int i = 0;
 	while (i + 2 < n && gDemoKeys[i + 1].t <= t) i++;
 	const DemoKey& a = gDemoKeys[i];
 	const DemoKey& b = gDemoKeys[i + 1];
-	// Two keys closer than 10 ms are a hard cut: the spline must not blend across it
-	const DemoKey* pp0 = &gDemoKeys[std::max(i - 1, 0)];
-	const DemoKey* pp3 = &gDemoKeys[std::min(i + 2, n - 1)];
-	if (a.t - pp0->t < 0.01f) pp0 = &a;
-	if (pp3->t - b.t < 0.01f) pp3 = &b;
-	const DemoKey& p0 = *pp0;
-	const DemoKey& p3 = *pp3;
-	float u = glm::clamp((float)((t - a.t) / (b.t - a.t)), 0.0f, 1.0f);
-	pos = catmullRom(p0.pos, a.pos, b.pos, p3.pos, u);
-	target = catmullRom(p0.target, a.target, b.target, p3.target, u);
-	fov = glm::mix(a.fov, b.fov, u);
+	float dt = std::max(b.t - a.t, 1e-4f);
+	float u = glm::clamp((float)((t - a.t) / dt), 0.0f, 1.0f);
+	pos = hermite(a.pos, b.pos, keyTangent(i, 0), keyTangent(i + 1, 0), dt, u);
+	glm::vec3 g = hermite(gDemoDir[i], gDemoDir[i + 1], keyTangent(i, 1), keyTangent(i + 1, 1), dt, u);
+	glm::vec3 dir(std::cos(g.y) * std::sin(g.x), std::sin(g.y), std::cos(g.y) * std::cos(g.x));
+	target = pos + dir * 10.0f;
+	fov = glm::mix(a.fov, b.fov, u * u * (3.0f - 2.0f * u));
 	flash = a.flash;
 	wire = a.wire;
 }
@@ -161,9 +216,51 @@ void sampleDemoPath(double t, glm::vec3& pos, glm::vec3& target, float& fov, int
 // The camera is meant to feel like a person filming, not like a perfect rail: slow
 // drift and breathing, and the aim follows the subject with a small delay (like a
 // person turning their head towards what they look at).
-bool applyDemo(double t)
+bool applyDemo(double t, double dt)
 {
 	if (t >= gDemoKeys.back().t) return false;
+	static int activeFree = -1;
+	for (size_t i = 0; i < gDemoFree.size(); i++)
+	{
+		if (t < gDemoFree[i].t0 || t >= gDemoFree[i].t1) continue;
+		glm::vec3 p, tg;
+		float fv;
+		int fl, wr;
+		if (activeFree != (int)i)
+		{
+			// entering the segment: start from the spline pose, then only the "keys" move the camera
+			activeFree = (int)i;
+			sampleDemoPath(gDemoFree[i].t0, p, tg, fv, fl, wr);
+			fpsCamera.setPosition(p);
+			fpsCamera.lookAt(tg);
+			fpsCamera.setFOV(fv);
+		}
+		float speed = MOVE_SPEED;
+		for (const DemoInput& k : gDemoInputs)
+			if (t >= k.t0 && t < k.t1 && k.key == "SHIFT") speed *= SPRINT_FACTOR;
+		for (const DemoInput& k : gDemoInputs)
+		{
+			if (t < k.t0 || t >= k.t1) continue;
+			if (k.key == "W") fpsCamera.move(speed * (float)dt * fpsCamera.getLook());
+			else if (k.key == "S") fpsCamera.move(speed * (float)dt * -fpsCamera.getLook());
+			else if (k.key == "A") fpsCamera.move(speed * (float)dt * -fpsCamera.getRight());
+			else if (k.key == "D") fpsCamera.move(speed * (float)dt * fpsCamera.getRight());
+			else if (k.key == "UP") fpsCamera.move(speed * (float)dt * glm::vec3(0.0f, 1.0f, 0.0f));
+			else if (k.key == "DOWN") fpsCamera.move(speed * (float)dt * -glm::vec3(0.0f, 1.0f, 0.0f));
+			else if (k.key == "LOOK") fpsCamera.rotate(k.yawRate * (float)dt, k.pitchRate * (float)dt);
+			else if (k.key == "ZOOM")
+			{
+				float u = glm::clamp((float)((t - k.t0) / (k.t1 - k.t0)), 0.0f, 1.0f);
+				fpsCamera.setFOV(glm::mix(k.yawRate, k.pitchRate, u * u * (3.0f - 2.0f * u)));
+			}
+		}
+		sampleDemoPath(t, p, tg, fv, fl, wr);
+		gFlashlightOn = false;
+		for (const DemoInput& k : gDemoInputs)
+			if (k.key == "FLASH" && t >= k.t0 && t < k.t1) gFlashlightOn = true;
+		return true;
+	}
+	activeFree = -1;
 	glm::vec3 pos, target;
 	float fov, lagFov;
 	int flash, wire, dummyFlash, dummyWire;
@@ -1390,7 +1487,7 @@ int main(int argc, char** argv)
 		if (gDemo)
 		{
 			double demoTime = ffmpegPipe ? currentTime : currentTime - demoStart;
-			if (!applyDemo(demoTime)) break;
+			if (!applyDemo(demoTime, deltaTime)) break;
 		}
 		else
 			update(deltaTime);

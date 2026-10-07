@@ -66,7 +66,10 @@ Sous Linux : `make BUILD=release && ./Scene_AllModels`. Le programme doit être 
 - Ampoules et écrans émissifs (shader sans éclairage, `shaders/bulb.*`).
 
 ### Mode démo (optionnel)
-`Scene_AllModels --demo fichier.txt` fait suivre à la caméra une trajectoire (spline de Catmull-Rom, avec coupes franches possibles) lue dans un fichier texte, une ligne par point : `t  px py pz  cx cy cz  fov  lampe_torche  fil_de_fer`. `--record sortie.mp4 --size 1920x1080` rend à horloge fixe de 60 images/s et envoie les images à FFmpeg.
+`Scene_AllModels --demo fichier.txt` fait suivre à la caméra un parcours scripté lu dans un fichier texte, une ligne par point de passage : `t  px py pz  cx cy cz  fov  lampe_torche  fil_de_fer`.
+- Position et **direction du regard** (yaw / pitch) sont interpolées par des cubiques de Hermite à tangentes monotones : la caméra glisse à vitesse régulière, ne « dépasse » jamais entre deux points et s'arrête vraiment sur une pause. Un léger balancement lent imite une personne qui filme.
+- Des segments « utilisation normale » rejouent des touches simulées avec la vraie règle de déplacement de `update()` : `free t0 t1`, `key W|A|S|D|UP|DOWN|SHIFT t0 t1`, `look yaw/s pitch/s t0 t1` (souris), `zoom fov0 fov1 t0 t1` (molette), `flashkey t0 t1` (touche F).
+- `--record sortie.mp4 --size 1920x1080` rend à horloge fixe de 60 images/s et envoie les images à FFmpeg : le rendu est fluide et identique à chaque exécution.
 
 ## Structure du code
 
