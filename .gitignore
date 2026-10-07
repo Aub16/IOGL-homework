@@ -1,0 +1,10 @@
+# compilations
+build/
+*.exe
+*.o
+*.d
+# systeme
+.DS_Store
+# outils de montage de la video de presentation (non inclus dans le rendu du code)
+video/
+SCRIPT_VIDEO.md
