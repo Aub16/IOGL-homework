@@ -1199,7 +1199,7 @@ int main(int argc, char** argv)
 	// stand side by side at a respectful distance, contemplating him - xbot,
 	// LittleBot perched on a crate, and 11-45-G standing on the floor between them.
 	const float kWallX = 10.39f;
-	const glm::vec3 skeletonPos(kWallX + SKELETON_BACK_Z - 0.03f, kSceneLift + 0.01f, 0.75f);	// z: every bone touching the floor is on solid floor
+	const glm::vec3 skeletonPos(kWallX + SKELETON_BACK_Z - 0.002f, kSceneLift + 0.01f, 0.75f);	// z: every bone touching the floor is on solid floor
 	const glm::vec3 exhibitCenter(skeletonPos.x - 0.4f, kSceneLift, skeletonPos.z);			// the dead man's chest, seen from above
 	const glm::vec3 xbotPos(4.6f, kSceneLift, 1.6f);
 	const glm::vec3 littleBotCratePos(2.5f, kSceneLift, -1.1f);
@@ -1216,8 +1216,8 @@ int main(int argc, char** argv)
 		// The mask hangs on the right wall, next to the dead man's head, face towards -X.
 		// The GLB lies face up (front = +Y, forehead = -Z, ~0.6 wide, 1.2 tall, centre (0.17, 0.49, 0.04));
 		// the rotation stands it up and cancels its 19 degree tilt. Position = wanted centre - rotated centre
-		// (the rotated centre is (-0.482, 0.117, 0.172)); the centre sits 0.1 off the wall, which touches its back.
-		{ M_MASK,      glm::vec3(kWallX - 0.09f + 0.482f, kSceneLift + 1.7f - 0.117f, skeletonPos.z - 1.4f - 0.172f), glm::vec3(1.0f), glm::vec3(71.2f, -90.0f, 0.0f) },
+		// (the rotated centre is (-0.482, 0.117, 0.172)); the centre sits 0.083 off the wall, which touches its back.
+		{ M_MASK,      glm::vec3(kWallX - 0.083f + 0.482f, kSceneLift + 1.7f - 0.117f, skeletonPos.z - 1.4f - 0.172f), glm::vec3(1.0f), glm::vec3(71.2f, -90.0f, 0.0f) },
 		{ M_WOODCRATE, littleBotCratePos,                     glm::vec3(1.0f),  glm::vec3(0.0f, 12.0f, 0.0f) },
 		{ M_LITTLEBOT, littleBotCratePos + glm::vec3(0.0f, kCrateHeight, 0.0f), glm::vec3(0.02f), glm::vec3(-90.0f, facing(littleBotCratePos, exhibitCenter), 0.0f) },	// Z-up GLB, perched on the crate
 		{ M_BARREL,    glm::vec3(-3.0f, kSceneLift + 1.3f, 0.9f), glm::vec3(1.0f), glm::vec3(0.0f, 35.0f, 90.0f) },	// knocked over

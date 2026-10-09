@@ -6,6 +6,8 @@ Une scène inspirée de *Three Robots* (*Love, Death & Robots*) : trois robots (
 
 Le programme principal est [`Scene_AllModels.cpp`](Scene_AllModels.cpp). Les autres fichiers `Lighting_*.cpp` sont les exercices de cours sur l'éclairage (Phong, point, spot, matériaux…), conservés.
 
+**Vidéo de présentation** : [`video/final.mp4`](video/final.mp4) (visite commentée de la scène et du code).
+
 ## Lancer
 
 Dépendances : un compilateur C++17, GLFW 3, GLEW, GLM, `make`, `pkg-config`.
