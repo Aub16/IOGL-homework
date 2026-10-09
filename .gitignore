@@ -6,5 +6,6 @@ build/
 # systeme
 .DS_Store
 # outils de montage de la video de presentation (non inclus dans le rendu du code)
-video/
+video/*
+!video/final.mp4
 SCRIPT_VIDEO.md
